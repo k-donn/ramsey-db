@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Ramsey Graph Visualizer</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<!-- Bootstrap CSS -->
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+	<!-- D3.js -->
+	<script src="https://d3js.org/d3.v7.min.js"></script>
+	<style>
+		.vertex {
+			stroke: #333;
+			stroke-width: 2px;
+		}
+		.edge {
+			stroke-width: 3px;
+			opacity: 0.7;
+		}
+		.highlight-k3 {
+			stroke: gold;
+			stroke-width: 6px;
+			opacity: 1;
+		}
+		.highlight-k4 {
+			stroke: lime;
+			stroke-width: 8px;
+			opacity: 1;
+		}
+		.vertex-label {
+			font-weight: bold;
+			font-size: 1.2em;
+			fill: #222;
+		}
+	</style>
+</head>
+<body class="bg-light">
+<div class="container py-4">
+	<h1 class="mb-4">Ramsey Complete Graph Visualizer R(3,4)</h1>
+	<form id="graphForm" class="mb-4">
+		<div class="input-group">
+			<span class="input-group-text">Graph ID</span>
+			<input type="text" class="form-control" id="graphId" placeholder="Enter graph id (e.g. 1)">
+			<button class="btn btn-primary" type="submit">Load Graph</button>
+		</div>
+	</form>
+	<div id="legend" class="my-3">
+		<span class="badge bg-danger">G</span>
+		<span class="badge bg-primary">G complement</span>
+		<span class="badge bg-warning text-dark">Highlighted K3</span>
+		<span class="badge bg-success">Highlighted K4</span>
+	</div>
+	<div id="graphArea" class="bg-white rounded shadow p-3 text-center">
+		<svg id="graphSvg" width="700" height="700"></svg>
+	</div>
+</div>
+<script>
+const width = 700, height = 700, radius = 270, vertexRadius = 20;
+const numVertices = 9;
+const vertices = Array.from({length: numVertices}, (_, i) => i);
+const vertexPositions = vertices.map((d, i) => {
+	const angle = (2 * Math.PI / vertices.length) * i - Math.PI / 2;
+	return {
+		x: width/2 + radius * Math.cos(angle),
+		y: height/2 + radius * Math.sin(angle)
+	};
+});
+
+function parseEdge(str) {
+	// e.g. "01" => [0,1]
+	return [parseInt(str[0]), parseInt(str[1])];
+}
+
+function drawGraph(data) {
+	const svg = d3.select("#graphSvg");
+	svg.selectAll("*").remove();
+
+	// Parse edges
+	const redEdges = data.red ? data.red.split(',').map(e => parseEdge(e.trim())) : [];
+	const blueEdges = data.blue ? data.blue.split(',').map(e => parseEdge(e.trim())) : [];
+
+	// Build edge map for quick lookup
+	const edgeMap = {};
+	redEdges.forEach(e => edgeMap[`${e[0]}${e[1]}`] = 'red');
+	blueEdges.forEach(e => edgeMap[`${e[0]}${e[1]}`] = 'blue');
+
+	// All possible edges in K9
+	const allEdges = [];
+	for (let i = 0; i < numVertices; ++i) {
+		for (let j = i+1; j < numVertices; ++j) {
+			allEdges.push([i, j]);
+		}
+	}
+
+	// Draw edges
+	svg.selectAll(".edge")
+		.data(allEdges)
+		.enter()
+		.append("line")
+		.attr("class", "edge")
+		.attr("x1", d => vertexPositions[d[0]].x)
+		.attr("y1", d => vertexPositions[d[0]].y)
+		.attr("x2", d => vertexPositions[d[1]].x)
+		.attr("y2", d => vertexPositions[d[1]].y)
+		.attr("stroke", d => {
+			const key1 = `${d[0]}${d[1]}`;
+			const key2 = `${d[1]}${d[0]}`;
+			if (edgeMap[key1] === 'red' || edgeMap[key2] === 'red') return "red";
+			if (edgeMap[key1] === 'blue' || edgeMap[key2] === 'blue') return "blue";
+			return "#ccc";
+		});
+	
+	// Highlight K3s
+	if (data.k3.length > 0) {
+		data.k3.forEach(triangle => {
+			for (let i = 0; i < 3; ++i) {
+				for (let j = i+1; j < 3; ++j) {
+					svg.append("line")
+						.attr("class", "highlight-k3")
+						.attr("x1", vertexPositions[triangle[i]].x)
+						.attr("y1", vertexPositions[triangle[i]].y)
+						.attr("x2", vertexPositions[triangle[j]].x)
+						.attr("y2", vertexPositions[triangle[j]].y);
+				}
+			}
+		});
+	}
+
+	// Highlight K4s
+	if (data.k4.length > 0) {
+		data.k4.forEach(clique => {
+			for (let i = 0; i < 4; ++i) {
+				for (let j = i+1; j < 4; ++j) {
+					svg.append("line")
+						.attr("class", "highlight-k4")
+						.attr("x1", vertexPositions[clique[i]].x)
+						.attr("y1", vertexPositions[clique[i]].y)
+						.attr("x2", vertexPositions[clique[j]].x)
+						.attr("y2", vertexPositions[clique[j]].y);
+				}
+			}
+		});
+	}
+
+	// Draw vertices
+	svg.selectAll(".vertex")
+		.data(vertices)
+		.enter()
+		.append("circle")
+		.attr("class", "vertex")
+		.attr("cx", d => vertexPositions[d].x)
+		.attr("cy", d => vertexPositions[d].y)
+		.attr("r", vertexRadius)
+		.attr("fill", "#fff");
+
+	// Draw labels
+	svg.selectAll(".vertex-label")
+		.data(vertices)
+		.enter()
+		.append("text")
+		.attr("class", "vertex-label")
+		.attr("x", d => vertexPositions[d].x)
+		.attr("y", d => vertexPositions[d].y + 6)
+		.attr("text-anchor", "middle")
+		.text(d => d);
+}
+
+document.getElementById("graphForm").addEventListener("submit", function(e) {
+	e.preventDefault();
+	const id = document.getElementById("graphId").value.trim();
+	if (!id) return;
+	fetch(`http://localhost:8000/db/${id}`)
+		.then(resp => resp.json())
+		.then(data => {
+			debugger;
+			if (data.k3 !== "" && typeof data.k3 === "string") {
+				try {
+					data.k3 = JSON.parse(data.k3);
+				} catch {
+					data.k3 = data.k3.split(';').map(s => s.split(',').map(Number));
+				}
+			}
+			if (data.k4 !== "" && typeof data.k4 === "string") {
+				try {
+					data.k4 = JSON.parse(data.k4);
+				} catch {
+					data.k4 = data.k4.split(';').map(s => s.split(',').map(Number));
+				}
+			}
+			drawGraph(data);
+		})
+		.catch(err => {
+			alert("Failed to load graph data.");
+			console.error(err);
+		});
+});
+
+// Draw empty graph initially
+drawGraph({red: "", blue: "", k3: [], k4: []});
+</script>
+</body>
+</html>

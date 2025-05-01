@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <numeric>
 #include <sqlite3.h>
+#include <chrono>
 
 constexpr int N = 9;
 
@@ -74,11 +75,14 @@ Graph graph6_to_boost(const std::string& g6) {
 }
 
 int main() {
+	auto start_time = std::chrono::high_resolution_clock::now();
 	std::string line;
 	std::vector<int> k3_counts;
 	std::vector<std::string> k3s;
 	std::vector<int> k4_counts;
 	std::vector<std::string> k4s;
+	std::vector<std::string> reds;
+	std::vector<std::string> blues;
 
 	while (std::getline(std::cin, line)) {
 		if (line.empty() || line[0] == '>') continue;
@@ -111,12 +115,42 @@ int main() {
 			if (i + 1 < k4.size()) k4_str += ",";
 		}
 
+		std::string red_str, blue_str;
+		std::vector<std::string> red_pairs, blue_pairs;
+		for (int u = 0; u < N; ++u) {
+			for (int v = u + 1; v < N; ++v) {
+				if (edge(u, v, g).second) {
+					red_pairs.push_back(std::to_string(u) + std::to_string(v));
+				}
+				if (edge(u, v, gc).second) {
+					blue_pairs.push_back(std::to_string(u) + std::to_string(v));
+				}
+			}
+		}
+		for (size_t i = 0; i < red_pairs.size(); ++i) {
+			red_str += red_pairs[i];
+			if (i + 1 < red_pairs.size()) red_str += ",";
+		}
+		for (size_t i = 0; i < blue_pairs.size(); ++i) {
+			blue_str += blue_pairs[i];
+			if (i + 1 < blue_pairs.size()) blue_str += ",";
+		}
+		
 		// Store results
 		k3_counts.push_back(k3_count);
 		k3s.push_back(k3_str);
 		k4_counts.push_back(k4_count);
 		k4s.push_back(k4_str);
+		reds.push_back(red_str);
+		blues.push_back(blue_str);
 	}
+
+	auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_time - start_time;
+
+	std::cout << "Generated graph data in: " << elapsed.count() << " seconds." << std::endl;
+
+	auto db_start_time = std::chrono::high_resolution_clock::now();
 
 	// Open SQLite database
 	sqlite3* db;
@@ -131,12 +165,14 @@ int main() {
 
 	// Create table
 	const char* create_sql =
-		"CREATE TABLE IF NOT EXISTS results ("
+		"CREATE TABLE IF NOT EXISTS r34 ("
 		"id INTEGER PRIMARY KEY AUTOINCREMENT,"
 		"k3_count INTEGER,"
 		"k3 TEXT,"
 		"k4_count INTEGER,"
-		"k4 TEXT"
+		"k4 TEXT,"
+		"red TEXT,"
+		"blue TEXT"
 		");";
 	char* errMsg = nullptr;
 	if (sqlite3_exec(db, create_sql, nullptr, nullptr, &errMsg) != SQLITE_OK) {
@@ -146,8 +182,16 @@ int main() {
 		return 1;
 	}
 
-	const char* clear_table_sql = "DELETE * FROM ramsey_results;";
+	const char* clear_table_sql = "DELETE FROM r34;";
 	if (sqlite3_exec(db, clear_table_sql, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+		std::cerr << "SQL error: " << errMsg << std::endl;
+		sqlite3_free(errMsg);
+		sqlite3_close(db);
+		return 1;
+	}
+
+	const char* reset_table_sql = "DELETE FROM sqlite_sequence WHERE name='r34';";
+	if (sqlite3_exec(db, reset_table_sql, nullptr, nullptr, &errMsg) != SQLITE_OK) {
 		std::cerr << "SQL error: " << errMsg << std::endl;
 		sqlite3_free(errMsg);
 		sqlite3_close(db);
@@ -158,7 +202,7 @@ int main() {
 
 	// Prepare insert statement
 	sqlite3_stmt* stmt;
-	const char* insert_sql = "INSERT INTO results (k3_count, k3, k4_count, k4) VALUES (?, ?, ?, ?);";
+	const char* insert_sql = "INSERT INTO r34 (k3_count, k3, k4_count, k4, red, blue) VALUES (?, ?, ?, ?, ?, ?);";
 	if (sqlite3_prepare_v2(db, insert_sql, -1, &stmt, nullptr) != SQLITE_OK) {
 		std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
 		sqlite3_close(db);
@@ -171,6 +215,9 @@ int main() {
 		sqlite3_bind_text(stmt, 2, k3s[i].c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_bind_int(stmt, 3, k4_counts[i]);
 		sqlite3_bind_text(stmt, 4, k4s[i].c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 5, reds[i].c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 6, blues[i].c_str(), -1, SQLITE_TRANSIENT);
+
 
 		if (sqlite3_step(stmt) != SQLITE_DONE) {
 			std::cerr << "Insert failed: " << sqlite3_errmsg(db) << std::endl;
@@ -182,5 +229,12 @@ int main() {
 
 	sqlite3_finalize(stmt);
 	sqlite3_close(db);
+
+	auto db_end_time = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> db_elapsed = db_end_time - db_start_time;
+	std::cout << "Wrote to db in: " << db_elapsed.count() << " seconds." << std::endl;
+	
+	std::chrono::duration<double> full_elapsed = db_end_time - start_time;
+	std::cout << "Total time: " << full_elapsed.count() << " seconds." << std::endl;
 	return 0;
 }
