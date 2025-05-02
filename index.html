@@ -17,12 +17,12 @@
 			stroke-width: 3px;
 			opacity: 0.7;
 		}
-		.highlight-k3 {
+		.highlight-k-red {
 			stroke: gold;
 			stroke-width: 6px;
 			opacity: 1;
 		}
-		.highlight-k4 {
+		.highlight-k-blue {
 			stroke: lime;
 			stroke-width: 8px;
 			opacity: 1;
@@ -36,19 +36,30 @@
 </head>
 <body class="bg-light">
 <div class="container py-4">
-	<h1 class="mb-4">Ramsey Complete Graph Visualizer R(3,4)</h1>
+	<h1 class="mb-4">Ramsey Complete Graph Visualizer</h1>
 	<form id="graphForm" class="mb-4">
-		<div class="input-group">
-			<span class="input-group-text">Graph ID</span>
-			<input type="text" class="form-control" id="graphId" placeholder="Enter graph id (e.g. 1)">
-			<button class="btn btn-primary" type="submit">Load Graph</button>
+		<div class="row g-2">
+			<div class="col-auto">
+				<select class="form-select" id="ramseyType">
+					<option value="r33">R(3,3)</option>
+					<option value="r34" selected>R(3,4)</option>
+					<option value="r35">R(3,5)</option>
+					<option value="r44">R(4,4)</option>
+				</select>
+			</div>
+			<div class="col-auto">
+				<input type="text" class="form-control" id="graphId" placeholder="Enter graph id (e.g. 1)">
+			</div>
+			<div class="col-auto">
+				<button class="btn btn-primary" type="submit">Load Graph</button>
+			</div>
 		</div>
 	</form>
 	<div id="legend" class="my-3">
 		<span class="badge bg-danger">G</span>
 		<span class="badge bg-primary">G complement</span>
-		<span class="badge bg-warning text-dark">Highlighted K3</span>
-		<span class="badge bg-success">Highlighted K4</span>
+		<span id="red-highlight-badge" class="badge bg-warning text-dark">Highlighted K3</span>
+		<span id="blue-highlight-badge" class="badge bg-success">Highlighted K4</span>
 	</div>
 	<div id="graphArea" class="bg-white rounded shadow p-3 text-center">
 		<svg id="graphSvg" width="700" height="700"></svg>
@@ -56,41 +67,63 @@
 </div>
 <script>
 const width = 700, height = 700, radius = 270, vertexRadius = 20;
-const numVertices = 9;
-const vertices = Array.from({length: numVertices}, (_, i) => i);
-const vertexPositions = vertices.map((d, i) => {
-	const angle = (2 * Math.PI / vertices.length) * i - Math.PI / 2;
-	return {
-		x: width/2 + radius * Math.cos(angle),
-		y: height/2 + radius * Math.sin(angle)
-	};
-});
 
-function parseEdge(str) {
-	// e.g. "01" => [0,1]
-	return [parseInt(str[0]), parseInt(str[1])];
+// Lookup table for Ramsey numbers and their requisite vertices
+const ramseyVertexCounts = {
+	r33: 6,
+	r34: 9,
+	r35: 14,
+	r44: 18
+};
+
+function getVertices(ramseyType) {
+	const n = ramseyVertexCounts[ramseyType];
+	return Array.from({length: n}, (_, i) => i);
 }
 
-function drawGraph(data) {
+function getVertexPositions(vertices) {
+	const n = vertices.length;
+	return vertices.map((d, i) => {
+		const angle = (2 * Math.PI / n) * i - Math.PI / 2;
+		return {
+			x: width/2 + radius * Math.cos(angle),
+			y: height/2 + radius * Math.sin(angle)
+		};
+	});
+}
+
+function parseEdge(str) {
+	return str.split(":").map(v => parseInt(v));
+}
+
+
+function drawGraph(data, ramseyType) {
 	const svg = d3.select("#graphSvg");
 	svg.selectAll("*").remove();
 
+	const numVertices = ramseyVertexCounts[ramseyType];
+	const vertices = getVertices(ramseyType);
+	const vertexPositions = getVertexPositions(vertices);
+
 	// Parse edges
-	const redEdges = data.red ? data.red.split(',').map(e => parseEdge(e.trim())) : [];
-	const blueEdges = data.blue ? data.blue.split(',').map(e => parseEdge(e.trim())) : [];
+	const redEdges = data.red_edges ? data.red_edges.split(',').map(e => parseEdge(e.trim())) : [];
+	const blueEdges = data.blue_edges ? data.blue_edges.split(',').map(e => parseEdge(e.trim())) : [];
 
 	// Build edge map for quick lookup
 	const edgeMap = {};
 	redEdges.forEach(e => edgeMap[`${e[0]}${e[1]}`] = 'red');
 	blueEdges.forEach(e => edgeMap[`${e[0]}${e[1]}`] = 'blue');
 
-	// All possible edges in K9
+	// All possible edges in Kn
 	const allEdges = [];
 	for (let i = 0; i < numVertices; ++i) {
 		for (let j = i+1; j < numVertices; ++j) {
 			allEdges.push([i, j]);
 		}
 	}
+
+	const redCliqueSize = parseInt(ramseyType[1]);
+	const blueCliqueSize = parseInt(ramseyType[2]);
 
 	// Draw edges
 	svg.selectAll(".edge")
@@ -109,30 +142,30 @@ function drawGraph(data) {
 			if (edgeMap[key1] === 'blue' || edgeMap[key2] === 'blue') return "blue";
 			return "#ccc";
 		});
-	
-	// Highlight K3s
-	if (data.k3.length > 0) {
-		data.k3.forEach(triangle => {
-			for (let i = 0; i < 3; ++i) {
-				for (let j = i+1; j < 3; ++j) {
+
+	// Highlight red K_X's
+	if (data.k_red && data.k_red.length > 0) {
+		data.k_red.forEach(clique => {
+			for (let i = 0; i < redCliqueSize; ++i) {
+				for (let j = i+1; j < redCliqueSize; ++j) {
 					svg.append("line")
-						.attr("class", "highlight-k3")
-						.attr("x1", vertexPositions[triangle[i]].x)
-						.attr("y1", vertexPositions[triangle[i]].y)
-						.attr("x2", vertexPositions[triangle[j]].x)
-						.attr("y2", vertexPositions[triangle[j]].y);
+						.attr("class", "highlight-k-red")
+						.attr("x1", vertexPositions[clique[i]].x)
+						.attr("y1", vertexPositions[clique[i]].y)
+						.attr("x2", vertexPositions[clique[j]].x)
+						.attr("y2", vertexPositions[clique[j]].y);
 				}
 			}
 		});
 	}
 
-	// Highlight K4s
-	if (data.k4.length > 0) {
-		data.k4.forEach(clique => {
-			for (let i = 0; i < 4; ++i) {
-				for (let j = i+1; j < 4; ++j) {
+	// Highlight blue K_Y's
+	if (data.k_blue && data.k_blue.length > 0) {
+		data.k_blue.forEach(clique => {
+			for (let i = 0; i < blueCliqueSize; ++i) {
+				for (let j = i+1; j < blueCliqueSize; ++j) {
 					svg.append("line")
-						.attr("class", "highlight-k4")
+						.attr("class", "highlight-k-blue")
 						.attr("x1", vertexPositions[clique[i]].x)
 						.attr("y1", vertexPositions[clique[i]].y)
 						.attr("x2", vertexPositions[clique[j]].x)
@@ -168,26 +201,28 @@ function drawGraph(data) {
 document.getElementById("graphForm").addEventListener("submit", function(e) {
 	e.preventDefault();
 	const id = document.getElementById("graphId").value.trim();
+	const ramseyType = document.getElementById("ramseyType").value;
 	if (!id) return;
-	fetch(`http://localhost:8000/db/${id}`)
+	document.getElementById("red-highlight-badge").innerHTML = `Highlighted red K<sub>${ramseyType[1]}</sub>`;
+	document.getElementById("blue-highlight-badge").innerHTML = `Highlighted blue K<sub>${ramseyType[2]}</sub>`;
+	fetch(`http://localhost:8000/db/${ramseyType}/${id}`)
 		.then(resp => resp.json())
 		.then(data => {
-			debugger;
-			if (data.k3 !== "" && typeof data.k3 === "string") {
+			if (data.k_red !== "" && typeof data.k_red === "string") {
 				try {
-					data.k3 = JSON.parse(data.k3);
+					data.k_red = JSON.parse(data.k_red);
 				} catch {
-					data.k3 = data.k3.split(';').map(s => s.split(',').map(Number));
+					data.k_red = data.k_red.split(';').map(s => s.split(',').map(Number));
 				}
 			}
-			if (data.k4 !== "" && typeof data.k4 === "string") {
+			if (data.k_blue !== "" && typeof data.k_blue === "string") {
 				try {
-					data.k4 = JSON.parse(data.k4);
+					data.k_blue = JSON.parse(data.k_blue);
 				} catch {
-					data.k4 = data.k4.split(';').map(s => s.split(',').map(Number));
+					data.k_blue = data.k_blue.split(';').map(s => s.split(',').map(Number));
 				}
 			}
-			drawGraph(data);
+			drawGraph(data, ramseyType);
 		})
 		.catch(err => {
 			alert("Failed to load graph data.");
@@ -195,8 +230,14 @@ document.getElementById("graphForm").addEventListener("submit", function(e) {
 		});
 });
 
-// Draw empty graph initially
-drawGraph({red: "", blue: "", k3: [], k4: []});
+// Draw empty graph initially for R(3,4)
+drawGraph({red: "", blue: "", k3: [], k4: []}, "r34");
+
+// Redraw empty graph when Ramsey type changes
+document.getElementById("ramseyType").addEventListener("change", function() {
+	const ramseyType = this.value;
+	drawGraph({red: "", blue: "", k3: [], k4: []}, ramseyType);
+});
 </script>
 </body>
 </html>

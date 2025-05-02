@@ -1,4 +1,5 @@
 ramsey_results.db
-gen-r34
+gen-rMN
+*.g6
 .vscode/
 __pycache__/
