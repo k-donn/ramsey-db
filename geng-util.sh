@@ -1,8 +1,13 @@
 #!/bin/bash
 
-output_file="graphs/14-graphs.graph6"
-: > "$output_file"  # Truncate the output file
+geng 6 > 6-graphs.g6
+
+geng 9 > 9-graphs.g6
 
 for x in $(seq 0 91); do
-	/opt/homebrew/opt/coreutils/libexec/gnubin/timeout 2 geng 14 $x:$x 2>/dev/null | head -15000 >> "$output_file"
+	geng 14 $x:$x | head -15000 >> 14-graphs.g6
+done
+
+for x in $(seq 0 153); do
+	geng 18 $x:$x | head -10000 >> 18-graphs.g6
 done

@@ -11,6 +11,11 @@
 #include <numeric>
 #include <sqlite3.h>
 #include <chrono>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <atomic>
 
 int N = -1;
 
@@ -23,11 +28,7 @@ const std::map<std::pair<int, int>, int> ramsey_lookup = {
 	{{3, 8}, 28},
 	{{3, 9}, 36},
 	{{4, 4}, 18},
-	{{4, 5}, 25},
-	{{4, 6}, 41},
-	{{4, 7}, 49},
-	{{5, 5}, 43},
-	{{5, 6}, 102},
+	{{4, 5}, 25}
 };
 
 using namespace boost;
@@ -127,66 +128,110 @@ int main(int argc, char* argv[]) {
 	}
 	N = lookup_it->second;
 
-	while (std::getline(std::cin, line)) {
-		if (line.empty() || line[0] == '>') continue;
-		Graph g = graph6_to_boost(line);
+	// Multithreaded reading and processing of graph data
+	const size_t NUM_THREADS = std::thread::hardware_concurrency();
+	std::queue<std::string> input_queue;
+	std::mutex queue_mutex;
+	std::condition_variable queue_cv;
+	std::atomic<bool> done_reading(false);
 
-		// Find k_red in g
-		int k_red_count = 0;
-		auto k_red = find_Kk(g, k_red_l, k_red_count);
+	// Output vectors and their mutex
+	std::mutex output_mutex;
 
-		// Complement
-		Graph gc(N);
-		for (int u = 0; u < N; ++u) {
-			for (int v = u + 1; v < N; ++v) {
-				if (!edge(u, v, g).second) {
-					add_edge(u, v, gc);
+	// Worker function
+	auto worker = [&]() {
+		while (true) {
+			std::string line;
+			{
+				std::unique_lock<std::mutex> lock(queue_mutex);
+				queue_cv.wait(lock, [&] { return !input_queue.empty() || done_reading; });
+				if (input_queue.empty()) {
+					if (done_reading) break;
+					else continue;
+				}
+				line = std::move(input_queue.front());
+				input_queue.pop();
+			}
+			if (line.empty() || line[0] == '>') continue;
+			Graph g = graph6_to_boost(line);
+
+			// Find k_red in g
+			int k_red_count = 0;
+			auto k_red = find_Kk(g, k_red_l, k_red_count);
+
+			// Complement
+			Graph gc(N);
+			for (int u = 0; u < N; ++u) {
+				for (int v = u + 1; v < N; ++v) {
+					if (!edge(u, v, g).second) {
+						add_edge(u, v, gc);
+					}
 				}
 			}
-		}
-		int k_blue_count = 0;
-		auto k_blue = find_Kk(gc, k_blue_l, k_blue_count);
+			int k_blue_count = 0;
+			auto k_blue = find_Kk(gc, k_blue_l, k_blue_count);
 
-		// Serialize vectors as comma-separated strings
-		std::string k_red_str, k_blue_str;
-		for (size_t i = 0; i < k_red.size(); ++i) {
-			k_red_str += std::to_string(k_red[i]);
-			if (i + 1 < k_red.size()) k_red_str += ",";
-		}
-		for (size_t i = 0; i < k_blue.size(); ++i) {
-			k_blue_str += std::to_string(k_blue[i]);
-			if (i + 1 < k_blue.size()) k_blue_str += ",";
-		}
+			// Serialize vectors as comma-separated strings
+			std::string k_red_str, k_blue_str;
+			for (size_t i = 0; i < k_red.size(); ++i) {
+				k_red_str += std::to_string(k_red[i]);
+				if (i + 1 < k_red.size()) k_red_str += ",";
+			}
+			for (size_t i = 0; i < k_blue.size(); ++i) {
+				k_blue_str += std::to_string(k_blue[i]);
+				if (i + 1 < k_blue.size()) k_blue_str += ",";
+			}
 
-		std::string red_str, blue_str;
-		std::vector<std::string> red_pairs, blue_pairs;
-		for (int u = 0; u < N; ++u) {
-			for (int v = u + 1; v < N; ++v) {
-				if (edge(u, v, g).second) {
-					red_pairs.push_back(std::to_string(u) + ":" + std::to_string(v));
-				}
-				if (edge(u, v, gc).second) {
-					blue_pairs.push_back(std::to_string(u) + ":" + std::to_string(v));
+			std::string red_str, blue_str;
+			std::vector<std::string> red_pairs, blue_pairs;
+			for (int u = 0; u < N; ++u) {
+				for (int v = u + 1; v < N; ++v) {
+					if (edge(u, v, g).second) {
+						red_pairs.push_back(std::to_string(u) + ":" + std::to_string(v));
+					}
+					if (edge(u, v, gc).second) {
+						blue_pairs.push_back(std::to_string(u) + ":" + std::to_string(v));
+					}
 				}
 			}
+			for (size_t i = 0; i < red_pairs.size(); ++i) {
+				red_str += red_pairs[i];
+				if (i + 1 < red_pairs.size()) red_str += ",";
+			}
+			for (size_t i = 0; i < blue_pairs.size(); ++i) {
+				blue_str += blue_pairs[i];
+				if (i + 1 < blue_pairs.size()) blue_str += ",";
+			}
+
+			// Store results
+			std::lock_guard<std::mutex> lock(output_mutex);
+			k_red_counts.push_back(k_red_count);
+			k_reds.push_back(k_red_str);
+			k_blue_counts.push_back(k_blue_count);
+			k_blues.push_back(k_blue_str);
+			red_edges.push_back(red_str);
+			blue_edges.push_back(blue_str);
 		}
-		for (size_t i = 0; i < red_pairs.size(); ++i) {
-			red_str += red_pairs[i];
-			if (i + 1 < red_pairs.size()) red_str += ",";
-		}
-		for (size_t i = 0; i < blue_pairs.size(); ++i) {
-			blue_str += blue_pairs[i];
-			if (i + 1 < blue_pairs.size()) blue_str += ",";
-		}
-		
-		// Store results
-		k_red_counts.push_back(k_red_count);
-		k_reds.push_back(k_red_str);
-		k_blue_counts.push_back(k_blue_count);
-		k_blues.push_back(k_blue_str);
-		red_edges.push_back(red_str);
-		blue_edges.push_back(blue_str);
+	};
+
+	// Start worker threads
+	std::vector<std::thread> threads;
+	for (size_t i = 0; i < NUM_THREADS; ++i) {
+		threads.emplace_back(worker);
 	}
+
+	// Producer: read lines from stdin and push to queue
+	while (std::getline(std::cin, line)) {
+		std::unique_lock<std::mutex> lock(queue_mutex);
+		input_queue.push(line);
+		lock.unlock();
+		queue_cv.notify_one();
+	}
+	done_reading = true;
+	queue_cv.notify_all();
+
+	// Join threads
+	for (auto& t : threads) t.join();
 
 	auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
