@@ -19,6 +19,12 @@
 
 int N = -1;
 
+struct RamseyResult {
+	long id;
+	int k_red_count, k_blue_count;
+	std::string k_red, k_blue, red_edges, blue_edges;
+};
+
 const std::map<std::pair<int, int>, int> ramsey_lookup = {
 	{{3, 3}, 6},
 	{{3, 4}, 9},
@@ -111,12 +117,6 @@ int main(int argc, char* argv[]) {
 	auto start_time = std::chrono::high_resolution_clock::now();
 	std::cout << "Processing graphs" << std::endl;
 	std::string line;
-	std::vector<int> k_red_counts;
-	std::vector<std::string> k_reds;
-	std::vector<int> k_blue_counts;
-	std::vector<std::string> k_blues;
-	std::vector<std::string> red_edges;
-	std::vector<std::string> blue_edges;
 
 	int k_red_l = atoi(argv[1]);
 	int k_blue_l = atoi(argv[2]);
@@ -138,6 +138,8 @@ int main(int argc, char* argv[]) {
 	// Output vectors and their mutex
 	std::mutex output_mutex;
 
+	std::vector<RamseyResult> results;
+
 	// Worker function
 	auto worker = [&]() {
 		while (true) {
@@ -153,7 +155,12 @@ int main(int argc, char* argv[]) {
 				input_queue.pop();
 			}
 			if (line.empty() || line[0] == '>') continue;
-			Graph g = graph6_to_boost(line);
+
+			size_t comma_pos = line.find(',');
+			if (comma_pos == std::string::npos) continue;
+			long id = stol(line.substr(0, comma_pos));
+			std::string g6_str = line.substr(comma_pos + 1);
+			Graph g = graph6_to_boost(g6_str);
 
 			// Find k_red in g
 			int k_red_count = 0;
@@ -183,34 +190,37 @@ int main(int argc, char* argv[]) {
 			}
 
 			std::string red_str, blue_str;
-			std::vector<std::string> red_pairs, blue_pairs;
+			std::vector<std::string> red_edges, blue_edges;
 			for (int u = 0; u < N; ++u) {
 				for (int v = u + 1; v < N; ++v) {
 					if (edge(u, v, g).second) {
-						red_pairs.push_back(std::to_string(u) + ":" + std::to_string(v));
+						red_edges.push_back(std::to_string(u) + ":" + std::to_string(v));
 					}
 					if (edge(u, v, gc).second) {
-						blue_pairs.push_back(std::to_string(u) + ":" + std::to_string(v));
+						blue_edges.push_back(std::to_string(u) + ":" + std::to_string(v));
 					}
 				}
 			}
-			for (size_t i = 0; i < red_pairs.size(); ++i) {
-				red_str += red_pairs[i];
-				if (i + 1 < red_pairs.size()) red_str += ",";
+			for (size_t i = 0; i < red_edges.size(); ++i) {
+				red_str += red_edges[i];
+				if (i + 1 < red_edges.size()) red_str += ",";
 			}
-			for (size_t i = 0; i < blue_pairs.size(); ++i) {
-				blue_str += blue_pairs[i];
-				if (i + 1 < blue_pairs.size()) blue_str += ",";
+			for (size_t i = 0; i < blue_edges.size(); ++i) {
+				blue_str += blue_edges[i];
+				if (i + 1 < blue_edges.size()) blue_str += ",";
 			}
 
 			// Store results
 			std::lock_guard<std::mutex> lock(output_mutex);
-			k_red_counts.push_back(k_red_count);
-			k_reds.push_back(k_red_str);
-			k_blue_counts.push_back(k_blue_count);
-			k_blues.push_back(k_blue_str);
-			red_edges.push_back(red_str);
-			blue_edges.push_back(blue_str);
+			RamseyResult result;
+			result.id = id;
+			result.k_red_count = k_red_count;
+			result.k_red = k_red_str;
+			result.k_blue_count = k_blue_count;
+			result.k_blue = k_blue_str;
+			result.red_edges = red_str;
+			result.blue_edges = blue_str;
+			results.push_back(result);
 		}
 	};
 
@@ -254,7 +264,7 @@ int main(int argc, char* argv[]) {
 	// Create table
 	std::string create_sql = 
 		"CREATE TABLE IF NOT EXISTS r" + std::string(argv[1]) + std::string(argv[2]) + " ("
-		"id INTEGER PRIMARY KEY AUTOINCREMENT,"
+		"id INTEGER PRIMARY KEY,"
 		"k_red_count INTEGER,"
 		"k_red TEXT,"
 		"k_blue_count INTEGER,"
@@ -281,19 +291,11 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	std::string reset_table_sql = "DELETE FROM sqlite_sequence WHERE name='" + table_name + "';";
-	if (sqlite3_exec(db, reset_table_sql.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
-		std::cerr << "SQL error: " << errMsg << std::endl;
-		sqlite3_free(errMsg);
-		sqlite3_close(db);
-		return 1;
-	}
-
 	sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
 
 	// Prepare insert statement
 	sqlite3_stmt* stmt;
-	std::string insert_sql = "INSERT INTO " + table_name + " (k_red_count, k_red, k_blue_count, k_blue, red_edges, blue_edges) VALUES (?, ?, ?, ?, ?, ?);";
+	std::string insert_sql = "INSERT INTO " + table_name + " (id, k_red_count, k_red, k_blue_count, k_blue, red_edges, blue_edges) VALUES (?, ?, ?, ?, ?, ?, ?);";
 	if (sqlite3_prepare_v2(db, insert_sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
 		std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
 		sqlite3_close(db);
@@ -301,13 +303,14 @@ int main(int argc, char* argv[]) {
 	}
 
 	// Insert data
-	for (size_t i = 0; i < k_red_counts.size(); ++i) {
-		sqlite3_bind_int(stmt, 1, k_red_counts[i]);
-		sqlite3_bind_text(stmt, 2, k_reds[i].c_str(), -1, SQLITE_TRANSIENT);
-		sqlite3_bind_int(stmt, 3, k_blue_counts[i]);
-		sqlite3_bind_text(stmt, 4, k_blues[i].c_str(), -1, SQLITE_TRANSIENT);
-		sqlite3_bind_text(stmt, 5, red_edges[i].c_str(), -1, SQLITE_TRANSIENT);
-		sqlite3_bind_text(stmt, 6, blue_edges[i].c_str(), -1, SQLITE_TRANSIENT);
+	for (size_t i = 0; i < results.size(); ++i) {
+		sqlite3_bind_int(stmt, 1, results[i].id);
+		sqlite3_bind_int(stmt, 2, results[i].k_red_count);
+		sqlite3_bind_text(stmt, 3, results[i].k_red.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_int(stmt, 4, results[i].k_blue_count);
+		sqlite3_bind_text(stmt, 5, results[i].k_blue.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 6, results[i].red_edges.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 7, results[i].blue_edges.c_str(), -1, SQLITE_TRANSIENT);
 
 
 		if (sqlite3_step(stmt) != SQLITE_DONE) {

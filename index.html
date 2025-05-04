@@ -40,15 +40,23 @@
 	<form id="graphForm" class="mb-4">
 		<div class="row g-2">
 			<div class="col-auto">
-				<select class="form-select" id="ramseyType">
+				<select class="form-select" id="ramseyType" required>
 					<option value="r33">R(3,3)</option>
 					<option value="r34" selected>R(3,4)</option>
 					<option value="r35">R(3,5)</option>
+					<option value="r36">R(3,6)</option>
 					<option value="r44">R(4,4)</option>
 				</select>
 			</div>
 			<div class="col-auto">
-				<input type="text" class="form-control" id="graphId" placeholder="Enter graph id (e.g. 1)">
+				<div class="input-group">
+					<div class="input-group-text">#</div>
+					<input type="text" class="form-control" id="graphId" placeholder="Enter graph id (e.g. 1)">
+					<div id="graph-count" class="input-group-text">of 274668</div>
+					<div class="invalid-feedback">
+						Invalid graph id!
+					</div>
+				</div>
 			</div>
 			<div class="col-auto">
 				<button class="btn btn-primary" type="submit">Load Graph</button>
@@ -68,16 +76,17 @@
 <script>
 const width = 700, height = 700, radius = 270, vertexRadius = 20;
 
-// Lookup table for Ramsey numbers and their requisite vertices
-const ramseyVertexCounts = {
-	r33: 6,
-	r34: 9,
-	r35: 14,
-	r44: 18
+// Lookup table for Ramsey numbers and their requisite properties
+const ramseyLookup = {
+	r33: {verts: 6, count: 156 },
+	r34: {verts: 9, count: 274668 },
+	r35: {verts: 14, count: 1063132 },
+	r36: {verts: 18, count: 1333750 },
+	r44: {verts: 18, count: 1333750 }
 };
 
 function getVertices(ramseyType) {
-	const n = ramseyVertexCounts[ramseyType];
+	const n = ramseyLookup[ramseyType].verts;
 	return Array.from({length: n}, (_, i) => i);
 }
 
@@ -101,7 +110,7 @@ function drawGraph(data, ramseyType) {
 	const svg = d3.select("#graphSvg");
 	svg.selectAll("*").remove();
 
-	const numVertices = ramseyVertexCounts[ramseyType];
+	const numVertices = ramseyLookup[ramseyType].verts;
 	const vertices = getVertices(ramseyType);
 	const vertexPositions = getVertexPositions(vertices);
 
@@ -198,14 +207,26 @@ function drawGraph(data, ramseyType) {
 		.text(d => d);
 }
 
+function updateTypeInfo(ramseyType) {
+	document.getElementById("graph-count").innerHTML = `of ${ramseyLookup[ramseyType].count}`;
+	document.getElementById("red-highlight-badge").innerHTML = `Highlighted red K<sub>${ramseyType[1]}</sub>`;
+	document.getElementById("blue-highlight-badge").innerHTML = `Highlighted blue K<sub>${ramseyType[2]}</sub>`;
+}
+
 document.getElementById("graphForm").addEventListener("submit", function(e) {
 	e.preventDefault();
 	const id = document.getElementById("graphId").value.trim();
 	const ramseyType = document.getElementById("ramseyType").value;
-	if (!id) return;
-	document.getElementById("red-highlight-badge").innerHTML = `Highlighted red K<sub>${ramseyType[1]}</sub>`;
-	document.getElementById("blue-highlight-badge").innerHTML = `Highlighted blue K<sub>${ramseyType[2]}</sub>`;
-	fetch(`http://localhost:8000/db/${ramseyType}/${id}`)
+	if (!id || id < 1 || id > ramseyLookup[ramseyType].count) {
+		document.getElementById("graphId").classList.add("is-invalid");
+		return;
+	} else {
+		if (document.getElementById("graphId").classList.contains("is-invalid")) {
+			document.getElementById("graphId").classList.remove("is-invalid");
+		}
+	}
+	updateTypeInfo(ramseyType);
+	fetch(`http://localhost:8000/db/${ramseyType}/${id - 1}`)
 		.then(resp => resp.json())
 		.then(data => {
 			if (data.k_red !== "" && typeof data.k_red === "string") {
@@ -232,11 +253,13 @@ document.getElementById("graphForm").addEventListener("submit", function(e) {
 
 // Draw empty graph initially for R(3,4)
 drawGraph({red: "", blue: "", k3: [], k4: []}, "r34");
+updateTypeInfo("r34");
 
 // Redraw empty graph when Ramsey type changes
 document.getElementById("ramseyType").addEventListener("change", function() {
 	const ramseyType = this.value;
 	drawGraph({red: "", blue: "", k3: [], k4: []}, ramseyType);
+	updateTypeInfo(ramseyType);
 });
 </script>
 </body>

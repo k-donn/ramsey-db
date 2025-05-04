@@ -24,9 +24,9 @@ Ensure `sqlite3` is on your include path!
 
 ### Execute
 
-Generate graphs with `./geng-util.sh`.
+Generate graphs with `python geng-util.py`.
 
-Make ramsey data with `./make-data.sh`.
+Make ramsey data with `python make-data.py`.
 
 Serve HTML `fastapi dev server.py`.
 

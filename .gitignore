@@ -1,5 +1,6 @@
 ramsey_results.db
 gen-rMN
 *.g6
+*.csv
 .vscode/
 __pycache__/
